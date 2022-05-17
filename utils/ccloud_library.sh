@@ -891,14 +891,21 @@ function ccloud::validate_ccloud_stack_up() {
   CLOUD_KEY=$1
   CONFIG_FILE=$2
   enable_ksqldb=$3
+  enable_sr=$4  
 
   if [ -z "$enable_ksqldb" ]; then
     enable_ksqldb=true
   fi
 
+  if [ -z "$enable_sr" ]; then
+    enable_sr=true
+  fi
+
   ccloud::validate_environment_set || exit 1
   ccloud::set_kafka_cluster_use_from_api_key "$CLOUD_KEY" || exit 1
-  ccloud::validate_schema_registry_up "$SCHEMA_REGISTRY_BASIC_AUTH_USER_INFO" "$SCHEMA_REGISTRY_URL" || exit 1
+  if $enable_sr ; then
+    ccloud::validate_schema_registry_up "$SCHEMA_REGISTRY_BASIC_AUTH_USER_INFO" "$SCHEMA_REGISTRY_URL" || exit 1
+  fi
   if $enable_ksqldb ; then
     ccloud::validate_ksqldb_up "$KSQLDB_ENDPOINT" || exit 1
     ccloud::validate_credentials_ksqldb "$KSQLDB_ENDPOINT" "$CONFIG_FILE" "$KSQLDB_BASIC_AUTH_USER_INFO" || exit 1
@@ -975,6 +982,7 @@ function ccloud::create_ccloud_stack() {
   QUIET="${QUIET:-false}"
   REPLICATION_FACTOR=${REPLICATION_FACTOR:-3}
   enable_ksqldb=${1:-false}
+  enable_sr=${2:-true}
   EXAMPLE=${EXAMPLE:-ccloud-stack-function}
   CHECK_CREDIT_CARD="${CHECK_CREDIT_CARD:-false}"
 
@@ -1036,11 +1044,13 @@ function ccloud::create_ccloud_stack() {
 
   ccloud::create_acls_all_resources_full_access $SERVICE_ACCOUNT_ID
 
-  SCHEMA_REGISTRY_GEO="${SCHEMA_REGISTRY_GEO:-us}"
-  SCHEMA_REGISTRY=$(ccloud::enable_schema_registry $CLUSTER_CLOUD $SCHEMA_REGISTRY_GEO)
-  SCHEMA_REGISTRY_ENDPOINT=$(confluent schema-registry cluster describe -o json | jq -r ".endpoint_url")
-  SCHEMA_REGISTRY_CREDS=$(ccloud::maybe_create_credentials_resource $SERVICE_ACCOUNT_ID $SCHEMA_REGISTRY)
-  
+  if $enable_sr ; then
+    SCHEMA_REGISTRY_GEO="${SCHEMA_REGISTRY_GEO:-us}"
+    SCHEMA_REGISTRY=$(ccloud::enable_schema_registry $CLUSTER_CLOUD $SCHEMA_REGISTRY_GEO)
+    SCHEMA_REGISTRY_ENDPOINT=$(confluent schema-registry cluster describe -o json | jq -r ".endpoint_url")
+    SCHEMA_REGISTRY_CREDS=$(ccloud::maybe_create_credentials_resource $SERVICE_ACCOUNT_ID $SCHEMA_REGISTRY)
+  fi
+
   if $enable_ksqldb ; then
     KSQLDB_NAME=${KSQLDB_NAME:-"demo-ksqldb-$SERVICE_ACCOUNT_ID"}
     KSQLDB=$(ccloud::maybe_create_ksqldb_app "$KSQLDB_NAME" $CLUSTER "$CLUSTER_CREDS")
@@ -1066,8 +1076,12 @@ function ccloud::create_ccloud_stack() {
 # ENVIRONMENT_ID=${ENVIRONMENT}
 # SERVICE_ACCOUNT_ID=${SERVICE_ACCOUNT_ID}
 # KAFKA_CLUSTER_ID=${CLUSTER}
+EOF
+    if $enable_sr ; then
+      cat <<EOF >> $CONFIG_FILE
 # SCHEMA_REGISTRY_CLUSTER_ID=${SCHEMA_REGISTRY}
 EOF
+    fi
     if $enable_ksqldb ; then
       cat <<EOF >> $CONFIG_FILE
 # KSQLDB APP ID: ${KSQLDB}
@@ -1079,11 +1093,15 @@ sasl.mechanism=PLAIN
 security.protocol=SASL_SSL
 bootstrap.servers=${BOOTSTRAP_SERVERS}
 sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username='${CLOUD_API_KEY}' password='${CLOUD_API_SECRET}';
+replication.factor=${REPLICATION_FACTOR}
+EOF
+    if $enable_sr ; then
+      cat <<EOF >> $CONFIG_FILE
 basic.auth.credentials.source=USER_INFO
 schema.registry.url=${SCHEMA_REGISTRY_ENDPOINT}
 basic.auth.user.info=`echo $SCHEMA_REGISTRY_CREDS | awk -F: '{print $1}'`:`echo $SCHEMA_REGISTRY_CREDS | awk -F: '{print $2}'`
-replication.factor=${REPLICATION_FACTOR}
 EOF
+    fi
     if $enable_ksqldb ; then
       cat <<EOF >> $CONFIG_FILE
 ksql.endpoint=${KSQLDB_ENDPOINT}

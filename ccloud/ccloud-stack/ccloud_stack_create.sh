@@ -24,6 +24,14 @@ then
   enable_ksqldb=true
 fi
 
+enable_sr=true
+read -p "Schema Registry will be automatically enabled in the cloud. Do you wish to use self managed Schema Registry instead? [y/n] " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]
+then
+  enable_sr=false
+fi
+
 if [[ -z "$ENVIRONMENT" ]]; then
   STMT=""
 else
@@ -33,7 +41,7 @@ fi
 export EXAMPLE="ccloud-stack-script"
 
 echo
-ccloud::create_ccloud_stack $enable_ksqldb || exit 1
+ccloud::create_ccloud_stack $enable_ksqldb $enable_sr || exit 1
 
 echo
 echo "Validating..."
@@ -49,7 +57,7 @@ if $enable_ksqldb ; then
   retry $MAX_WAIT ccloud::validate_ccloud_ksqldb_endpoint_ready $KSQLDB_ENDPOINT || exit 1
 fi
 
-ccloud::validate_ccloud_stack_up $CLOUD_KEY $CONFIG_FILE $enable_ksqldb || exit 1
+ccloud::validate_ccloud_stack_up $CLOUD_KEY $CONFIG_FILE $enable_ksqldb $enable_sr || exit 1
 
 echo
 echo "ACLs in this cluster:"
